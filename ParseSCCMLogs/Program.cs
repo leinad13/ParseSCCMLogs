@@ -9,6 +9,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using CsvHelper;
 using System.Threading;
+using System.Diagnostics;
 
 namespace ParseSCCMLogs
 {
@@ -17,6 +18,8 @@ namespace ParseSCCMLogs
         static string Hostname;
         static void Main(string[] args)
         {
+            Stopwatch stop = new Stopwatch();
+            stop.Start();
 
             string LogPath = "C:\\Windows\\CCM\\Logs\\";
 
@@ -79,9 +82,10 @@ namespace ParseSCCMLogs
             string OutputPath = Path.GetTempPath();
             Directory.CreateDirectory(OutputPath + "SCCMLogs");
 
+            /*
             foreach (string log in logfiles)
             {
-                Console.WriteLine("Working on file {0} in Thread {1}", log);
+                Console.WriteLine("Working on file {0} in Thread x", log);
                 List<LogLine> loglines = ParseLogFile(log);
            
                 if (loglines.Count > 0)
@@ -98,8 +102,30 @@ namespace ParseSCCMLogs
                     sw.Close();
                 }
             }
+            */
 
-            System.Console.WriteLine("Finished!!");
+            Parallel.ForEach(logfiles, (log) =>
+            {
+                Console.WriteLine("Working on file {0} in Thread {1}", log, Thread.CurrentThread.ManagedThreadId);
+                List<LogLine> loglines = ParseLogFile(log);
+
+                if (loglines.Count > 0)
+                {
+                    string[] filenamesplit = log.Split('\\');
+                    string filename = filenamesplit[filenamesplit.Length - 1];
+                    filename = filename.Replace(".log", ".csv");
+                    string outfilename = OutputPath + "SCCMLogs\\" + filename;
+
+                    StreamWriter sw = new StreamWriter(outfilename);
+
+                    CsvWriter csv = new CsvWriter(sw);
+                    csv.WriteRecords(loglines);
+                    sw.Close();
+                }
+            });
+
+            stop.Stop();
+            System.Console.WriteLine("Finished in {0}", stop.Elapsed);
 #if DEBUG
             System.Console.ReadLine();
 #endif
@@ -115,7 +141,17 @@ namespace ParseSCCMLogs
             // Read File into String Array
             try
             {
-                string[] AllLines = File.ReadAllLines(path);
+                //string[] AllLines = File.ReadAllLines(path);
+                FileStream fs = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                StreamReader sr = new StreamReader(fs);
+                List<string> AllLines = new List<string>();
+                string aline;
+                while((aline = sr.ReadLine()) != null)
+                {
+                    AllLines.Add(aline);
+                }
+
+
                 string buffer = "";
                 foreach (string line in AllLines)
                 {
@@ -133,7 +169,7 @@ namespace ParseSCCMLogs
                         buffer = (string)objarr[1];
                     }
                 }
-            } catch (System.IO.IOException e)
+            } catch (Exception e)
             {
                 Console.WriteLine("Problem accessing the file : {0}", path);
             }
