@@ -7,6 +7,8 @@ using System.Net.NetworkInformation;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using CsvHelper;
+using System.Threading;
 
 namespace ParseSCCMLogs
 {
@@ -33,6 +35,7 @@ namespace ParseSCCMLogs
             else
             {
                 System.Console.WriteLine("Remote Hostname provided, checking if machine is online...");
+
                 Hostname = args[0];
                 if (PingHostname(Hostname)!= true)
                 {
@@ -40,6 +43,7 @@ namespace ParseSCCMLogs
                     return;
                 }
                 LogPath = "\\\\" + Hostname + "\\c$\\Windows\\CCM\\Logs\\";
+                
             }
 
             Console.WriteLine("Log Path = {0}", LogPath);
@@ -60,14 +64,39 @@ namespace ParseSCCMLogs
             logfiles.RemoveAll(u => u.Contains("\\SC"));
             // Remove log file names beginning with \_SC
             logfiles.RemoveAll(u => u.Contains("\\_SC"));
+            // Remove SMSTS logs for now
+            //logfiles.RemoveAll(u => u.Contains("SMSTS"));
+            // Remove ZTI logs for now
+            logfiles.RemoveAll(u => u.Contains("zti"));
+            logfiles.RemoveAll(u => u.Contains("ZTI"));
+            logfiles.RemoveAll(u => u.Contains("BDD"));
+            logfiles.RemoveAll(u => u.Contains("wedmtrace.log"));
 
             //// TESTING /// 
             // Lets work on a few log files for initial test...
-            logfiles.RemoveAll(u => !u.Contains("\\App"));
+            //logfiles.RemoveAll(u => !u.Contains("\\App"));
 
-            foreach(string log in logfiles)
+            string OutputPath = Path.GetTempPath();
+            Directory.CreateDirectory(OutputPath + "SCCMLogs");
+
+            foreach (string log in logfiles)
             {
+                Console.WriteLine("Working on file {0} in Thread {1}", log);
                 List<LogLine> loglines = ParseLogFile(log);
+           
+                if (loglines.Count > 0)
+                {
+                    string[] filenamesplit = log.Split('\\');
+                    string filename = filenamesplit[filenamesplit.Length - 1];
+                    filename = filename.Replace(".log", ".csv");
+                    string outfilename = OutputPath + "SCCMLogs\\" + filename;
+
+                    StreamWriter sw = new StreamWriter(outfilename);
+
+                    CsvWriter csv = new CsvWriter(sw);
+                    csv.WriteRecords(loglines);
+                    sw.Close();
+                }
             }
 
             System.Console.WriteLine("Finished!!");
@@ -164,9 +193,12 @@ namespace ParseSCCMLogs
             string timestring = matches[0].Groups[2].Value;
             timestring = timestring.Split('+')[0];
             timestring = timestring.Split('-')[0];
+            string timems = timestring.Split('.')[1];
+            timems = timems.Substring(0, 3);
+            timestring = timestring.Split('.')[0] + "." + timems;
             string datetimestring = matches[0].Groups[3].Value + " " + timestring;
-            DateTime time = DateTime.ParseExact(datetimestring, dateformat, System.Globalization.CultureInfo.InvariantCulture);
 
+            DateTime time = DateTime.ParseExact(datetimestring, dateformat, System.Globalization.CultureInfo.InvariantCulture);
             string component = matches[0].Groups[4].Value;
             string type = matches[0].Groups[5].Value;
             string thread = matches[0].Groups[6].Value;
