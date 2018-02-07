@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace ParseSCCMLogs
@@ -23,7 +24,7 @@ namespace ParseSCCMLogs
                 System.Console.WriteLine("No Hostname provided, working on C:\\Windows\\CCM\\Logs");
                 Hostname = null;
             }
-            else if (args.Length > 1)
+            else if (args.Length > 2)
             {
                 // Too many arguments
                 System.Console.WriteLine("Too many arguments provided");
@@ -63,7 +64,13 @@ namespace ParseSCCMLogs
             //// TESTING /// 
             // Lets work on a few log files for initial test...
             logfiles.RemoveAll(u => !u.Contains("\\App"));
-            
+
+            foreach(string log in logfiles)
+            {
+                List<LogLine> loglines = ParseLogFile(log);
+            }
+
+            System.Console.WriteLine("Finished!!");
 #if DEBUG
             System.Console.ReadLine();
 #endif
@@ -77,17 +84,102 @@ namespace ParseSCCMLogs
             List<LogLine> loglinelist = new List<LogLine>();
 
             // Read File into String Array
-            string[] AllLines = File.ReadAllLines(path);
+            try
+            {
+                string[] AllLines = File.ReadAllLines(path);
+                string buffer = "";
+                foreach (string line in AllLines)
+                {
+                    // Buffer string is used to hangle multiline entries
+
+                    Object[] objarr = ParseLogLine(line, buffer);
+                    // If the line is part of a multiline entry the ParseLogLine function will return null until the whole multiline has been handled
+                    if (objarr[0] != null)
+                    {
+                        loglinelist.Add((LogLine)objarr[0]);
+                        buffer = "";
+                    }
+                    else
+                    {
+                        buffer = (string)objarr[1];
+                    }
+                }
+            } catch (System.IO.IOException e)
+            {
+                Console.WriteLine("Problem accessing the file : {0}", path);
+            }
+            
+
+            /*
             Parallel.For(0, AllLines.Length, x =>
             {
                 
             });
-
+            */
+            
             return loglinelist;
         }
-        
-        static LogLine ParseLogLine(string logline)
+
+        static MatchCollection ParseSCCMLogLine(string line)
         {
+            Regex r = new Regex(@"<!\[LOG\[(.*?)\]LOG\]!><time=""(.*?)""\s*date=""(.*?)""\s*component=""(.*?)""\s*context=""""\s*type=""([\d])""\s*thread=""([\d]+)""\s*file=""(.*?)"">");
+            MatchCollection matches = r.Matches(line);
+            return matches;
+        }
+        
+        static Object[] ParseLogLine(string logline, string buffer)
+        {
+            string dateformat = "M-d-yyyy HH:mm:ss.fff";
+            // Regex test 1
+            // Grok / Logstash Builtin Patterns https://github.com/logstash-plugins/logstash-patterns-core/blob/master/patterns/grok-patterns
+            // Debuggex Tester - https://www.debuggex.com/
+            // Best Regex Tester - https://regexr.com/
+            // Pattern Test - <!\[LOG\[(.*?)\]LOG\]!><time="(.*?)"\s*date="(.*?)"\s*component="(.*?)"\s*context=""\s*type="([1-3])"\s*thread="([\d]+)"\s*file="(.*?)">
+
+            // Is the line a oneline log entry?
+            MatchCollection matches = ParseSCCMLogLine(logline);
+
+            if (matches.Count < 1)
+            {
+                // Test if this is the last line
+                Regex r1 = new Regex(@".*?file="".*");
+                MatchCollection matches1 = r1.Matches(logline);
+                if (matches1.Count > 0)
+                {
+                    // This is the last line ass to buffer then reparse as one line
+                    buffer = buffer + logline;
+                    matches = ParseSCCMLogLine(buffer);
+
+                } else
+                {
+                    buffer = buffer + logline;
+                    Object[] arr = new Object[] { null, buffer };
+                    return arr;
+                }
+                // No match add line to buffer
+                
+            }
+            
+            string text = matches[0].Groups[1].Value;
+            string timestring = matches[0].Groups[2].Value;
+            timestring = timestring.Split('+')[0];
+            timestring = timestring.Split('-')[0];
+            string datetimestring = matches[0].Groups[3].Value + " " + timestring;
+            DateTime time = DateTime.ParseExact(datetimestring, dateformat, System.Globalization.CultureInfo.InvariantCulture);
+
+            string component = matches[0].Groups[4].Value;
+            string type = matches[0].Groups[5].Value;
+            string thread = matches[0].Groups[6].Value;
+            string file = matches[0].Groups[7].Value;
+
+            LogLine l = new LogLine(component,
+                                    time,
+                                    Int32.Parse(thread),
+                                    text,
+                                    file,
+                                    Int16.Parse(type));
+            Object[] retarr = new Object[] { l, buffer };
+            return retarr;
 
         }
 
