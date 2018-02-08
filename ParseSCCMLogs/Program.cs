@@ -63,46 +63,15 @@ namespace ParseSCCMLogs
 
             // Get Log File Names
             List<string> logfiles = Directory.EnumerateFiles(LogPath).ToList();
-            // Remove log file names beginning with \SC
-            logfiles.RemoveAll(u => u.Contains("\\SC"));
-            // Remove log file names beginning with \_SC
-            logfiles.RemoveAll(u => u.Contains("\\_SC"));
-            // Remove SMSTS logs for now
-            //logfiles.RemoveAll(u => u.Contains("SMSTS"));
-            // Remove ZTI logs for now
-            logfiles.RemoveAll(u => u.Contains("zti"));
-            logfiles.RemoveAll(u => u.Contains("ZTI"));
-            logfiles.RemoveAll(u => u.Contains("BDD"));
-            logfiles.RemoveAll(u => u.Contains("wedmtrace.log"));
 
-            //// TESTING /// 
-            // Lets work on a few log files for initial test...
-            //logfiles.RemoveAll(u => !u.Contains("\\App"));
+            // List of log file name filters to exclude from the list to work on
+            string[] excludeFilterStrings = new string[] { "\\SC", "\\_SC", "SMSTS", "zti", "ZTI", "BDD", "wedmtrace.log" };
+
+            // Remove the log names which match one of the filter strings
+            logfiles.RemoveAll(logname => excludeFilterStrings.Any(exclude => logname.Contains(exclude)));
 
             string OutputPath = Path.GetTempPath();
             Directory.CreateDirectory(OutputPath + "SCCMLogs");
-
-            /*
-            foreach (string log in logfiles)
-            {
-                Console.WriteLine("Working on file {0} in Thread x", log);
-                List<LogLine> loglines = ParseLogFile(log);
-           
-                if (loglines.Count > 0)
-                {
-                    string[] filenamesplit = log.Split('\\');
-                    string filename = filenamesplit[filenamesplit.Length - 1];
-                    filename = filename.Replace(".log", ".csv");
-                    string outfilename = OutputPath + "SCCMLogs\\" + filename;
-
-                    StreamWriter sw = new StreamWriter(outfilename);
-
-                    CsvWriter csv = new CsvWriter(sw);
-                    csv.WriteRecords(loglines);
-                    sw.Close();
-                }
-            }
-            */
 
             Parallel.ForEach(logfiles, (log) =>
             {
@@ -130,7 +99,6 @@ namespace ParseSCCMLogs
             System.Console.ReadLine();
 #endif
         }
-
 
         static List<LogLine> ParseLogFile(string path)
         {
