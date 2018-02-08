@@ -10,59 +10,133 @@ using System.Threading.Tasks;
 using CsvHelper;
 using System.Threading;
 using System.Diagnostics;
+using CommandLine;
 
 namespace ParseSCCMLogs
 {
     class Program
     {
-        static string Hostname;
+        static Stopwatch stop;
         static void Main(string[] args)
         {
-            Stopwatch stop = new Stopwatch();
+
+            // CommandlineParser Library - https://github.com/commandlineparser/commandline
+
+            // Start Program Stopwatch
+            stop = new Stopwatch();
             stop.Start();
 
+            var result = Parser.Default.ParseArguments<Options>(args)
+                .WithParsed(options => RunProgram(options))
+                .WithNotParsed(errors => ExitProgam(errors));
+
+        }
+
+        private static void ExitProgam(IEnumerable<Error> errors)
+        {
+            return;
+        }
+
+        private static void RunProgram(Options options)
+        {
+            string Hostname = options.Hostname;
             string LogPath = "C:\\Windows\\CCM\\Logs\\";
 
-            if (args.Length == 0)
-            {
-                // No Argument Provided
-                System.Console.WriteLine("No Hostname provided, working on C:\\Windows\\CCM\\Logs");
-                Hostname = null;
-            }
-            else if (args.Length > 2)
-            {
-                // Too many arguments
-                System.Console.WriteLine("Too many arguments provided");
-                return;
-            }
-            else
-            {
+            if (Hostname != null)
+            { 
                 System.Console.WriteLine("Remote Hostname provided, checking if machine is online...");
 
-                Hostname = args[0];
-                if (PingHostname(Hostname)!= true)
+                if (PingHostname(Hostname) != true)
                 {
                     Console.WriteLine("Unable to contact hostname : {0}", Hostname);
                     return;
                 }
                 LogPath = "\\\\" + Hostname + "\\c$\\Windows\\CCM\\Logs\\";
-                
             }
 
-            Console.WriteLine("Log Path = {0}", LogPath);
+            // Get a list of all the log files we are going to parse
+            List<string> logfiles = GetLogPaths(LogPath);
+            
+            switch (options.OutputType)
+            {
+                case "csv":
+                    RunParseCSV(options.DestinationDir, true, logfiles);
+                    break;
+                case "csv1":
+                    RunParseCSV(options.DestinationDir, false, logfiles);
+                    break;
+            }
 
+
+
+            stop.Stop();
+            System.Console.WriteLine("Finished in {0}", stop.Elapsed);
+#if DEBUG
+            System.Console.ReadLine();
+#endif
+
+        }
+
+        private static void RunParseCSV(string destinationDir, bool v, List<string> logfiles)
+        {
+            Directory.CreateDirectory(destinationDir);
+
+            CsvHelper.Configuration.Configuration csvconf = new CsvHelper.Configuration.Configuration();
+            csvconf.RegisterClassMap(new LogLineMap());
+
+            if (v == false)
+            {
+                // Single CSV
+                List<LogLine> loglines = new List<LogLine>();
+                Parallel.ForEach(logfiles, (log) =>
+                {
+                    loglines.AddRange(ParseLogFile(log));
+                });
+                string outfilename = destinationDir + "\\AllLogs.csv";
+                StreamWriter sw = new StreamWriter(outfilename);
+                CsvWriter csv = new CsvWriter(sw,csvconf);
+                csv.WriteRecords(loglines);
+                sw.Close();
+            }
+            else
+            {
+                // Multiple CSVs
+                Parallel.ForEach(logfiles, (log) =>
+                {
+                    Console.WriteLine("Working on file {0} in Thread {1}", log, Thread.CurrentThread.ManagedThreadId);
+                    List<LogLine> loglines = ParseLogFile(log);
+                    if (loglines.Count > 0)
+                    {
+                        string[] filenamesplit = log.Split('\\');
+                        string filename = filenamesplit[filenamesplit.Length - 1];
+                        filename = filename.Replace(".log", ".csv");
+                        string outfilename = destinationDir + "\\" + filename;
+                        StreamWriter sw = new StreamWriter(outfilename);
+                        CsvWriter csv = new CsvWriter(sw);
+                        csv.WriteRecords(loglines);
+                        sw.Close();
+                    }
+                });
+            }            
+        }
+
+        private static List<string> GetLogPaths(string logPath)
+        {
             // Check Path Exists
-            if(Directory.Exists(LogPath))
+            if (Directory.Exists(logPath))
             {
-                Console.WriteLine("Found path : {0}", LogPath);
-            } else
-            {
-                Console.WriteLine("Unable to find path, SCCM client may not be installed : {0}", LogPath);
-                return;
+                Console.WriteLine("Found path : {0}", logPath);
             }
+            else
+            {
+                Console.WriteLine("Unable to find path, SCCM client may not be installed : {0}", logPath);
+                return null;
+            }
+
+            Console.WriteLine("Log Path = {0}", logPath);
 
             // Get Log File Names
-            List<string> logfiles = Directory.EnumerateFiles(LogPath).ToList();
+            List<string> logfiles = Directory.EnumerateFiles(logPath).ToList();
 
             // List of log file name filters to exclude from the list to work on
             string[] excludeFilterStrings = new string[] { "\\SC", "\\_SC", "SMSTS", "zti", "ZTI", "BDD", "wedmtrace.log" };
@@ -70,34 +144,7 @@ namespace ParseSCCMLogs
             // Remove the log names which match one of the filter strings
             logfiles.RemoveAll(logname => excludeFilterStrings.Any(exclude => logname.Contains(exclude)));
 
-            string OutputPath = Path.GetTempPath();
-            Directory.CreateDirectory(OutputPath + "SCCMLogs");
-
-            Parallel.ForEach(logfiles, (log) =>
-            {
-                Console.WriteLine("Working on file {0} in Thread {1}", log, Thread.CurrentThread.ManagedThreadId);
-                List<LogLine> loglines = ParseLogFile(log);
-
-                if (loglines.Count > 0)
-                {
-                    string[] filenamesplit = log.Split('\\');
-                    string filename = filenamesplit[filenamesplit.Length - 1];
-                    filename = filename.Replace(".log", ".csv");
-                    string outfilename = OutputPath + "SCCMLogs\\" + filename;
-
-                    StreamWriter sw = new StreamWriter(outfilename);
-
-                    CsvWriter csv = new CsvWriter(sw);
-                    csv.WriteRecords(loglines);
-                    sw.Close();
-                }
-            });
-
-            stop.Stop();
-            System.Console.WriteLine("Finished in {0}", stop.Elapsed);
-#if DEBUG
-            System.Console.ReadLine();
-#endif
+            return logfiles;
         }
 
         static List<LogLine> ParseLogFile(string path)

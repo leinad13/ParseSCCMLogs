@@ -1,4 +1,5 @@
-﻿using System;
+﻿using CsvHelper.Configuration;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -6,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace ParseSCCMLogs
 {
-    class LogLine
+    public class LogLine
     {
         public string Component { get; set; }
         public DateTime dateTime { get; set; }
@@ -27,6 +28,19 @@ namespace ParseSCCMLogs
             Text = text;
             Filename = filename;
             Type = type;
+        }
+    }
+
+    public sealed class LogLineMap : ClassMap<LogLine>
+    {
+        public LogLineMap()
+        {
+            AutoMap();
+            // Default CSV DateTime to String conversion was ignoring the millisecond component. This fixes that.
+            Map(m => m.dateTime).ConvertUsing(m =>
+            {
+                return m.dateTime.ToString("dd/MM/yyyy hh:mm:ss.fff");
+            });
         }
     }
 }
