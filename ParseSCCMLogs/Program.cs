@@ -12,6 +12,9 @@ using System.Threading;
 using System.Diagnostics;
 using CommandLine;
 using System.Data.Linq;
+using System.Data.SqlClient;
+using System.Data.OleDb;
+using System.Data;
 
 namespace ParseSCCMLogs
 {
@@ -85,69 +88,46 @@ namespace ParseSCCMLogs
 
         private static void RunOutputSQL(string serverName, string databaseName, List<string> logfiles)
         {
-            // 1. TODO - Check Database Connection is possible
+            // Run Output to Single CSV
+            string CSVLocation = Path.GetTempPath();
+            RunOutputCSV(CSVLocation, false,logfiles);
 
-            // 2. Parse and store log rows in List<LogLines>
-            List<LogLine> loglines = new List<LogLine>();
-            Parallel.ForEach(logfiles, (log) =>
+            // Check CSV was created
+            if (!File.Exists(CSVLocation + "AllLogs.csv"))
             {
-                loglines.AddRange(ParseLogFile(log));
-            });
+                Console.WriteLine("Problem writing tempoary CSV file");
+                Environment.Exit(1);
+            }
 
             // 3. Does Hostname exist in Database?
-            // 3.1 Determine Hostname
-            string host;
-            if (logfiles[0].Substring(0,1) == "\\")
-            {
-                // First character of log paths is \ (Remote Hostname)
-                host = logfiles[0].Split('\\')[2];
-            }
-            else
-            {
-                host = System.Environment.MachineName;
-            }
             try
             {
-                // 3.2 - Query Database
-                DataClasses1DataContext db = new DataClasses1DataContext(BuildSQLConnectionString(serverName, databaseName));
-
-                Table<Hostname> hosttable = db.GetTable<Hostname>();
-                var hostquery =
-                    from h in hosttable
-                    where h.Hostname1 == host
-                    select h;
-                List<Hostname> hostsfound = hostquery.ToList();
-                if (hostsfound.Count != 1)
+                using (SqlConnection conn = new SqlConnection(BuildSQLConnectionString(serverName, databaseName)))
                 {
-                    Hostname newhost = new Hostname
-                    {
-                        Hostname1 = host,
-                        LastDateEntered = null
-                    };
-                    db.Hostnames.InsertOnSubmit(newhost);
-                    db.SubmitChanges();
-                }
+                    // 3.2 - Query Database https://stackoverflow.com/questions/3750999/very-slow-insert-process-using-linq-to-sql
 
-                hostsfound = hostquery.ToList();
+                    conn.Open();
+                    string csvConnString = "Provider=Microsoft.Jet.OLEDB.4.0;Data Source=" + CSVLocation + ";Extended Properties='text;'";
+                    OleDbDataAdapter oleda = new OleDbDataAdapter("SELECT * FROM [AllLogs.csv]",csvConnString);
+                    DataTable dt = new DataTable();
+                    oleda.Fill(dt);
+                    
 
-                /* Speed test 1*/
-                Table<LogText> logtexttable = db.GetTable<LogText>();
-                List<LogText> logtextlist = new List<LogText>();
-                foreach (LogLine line in loglines)
-                {
-                    logtextlist.Add(new LogText
+                    using (SqlBulkCopy copy = new SqlBulkCopy(conn))
                     {
-                        HostnameID = hostsfound[0].HostnameID,
-                        Component = line.Component,
-                        dateTime = line.dateTime,
-                        Thread = line.Thread,
-                        Filename = line.Filename,
-                        Type = line.Type,
-                        Text = line.Text
-                    });
+                        copy.BulkCopyTimeout = 180;
+                        copy.ColumnMappings.Add("Hostname", "Hostname");
+                        copy.ColumnMappings.Add("Component", "Component");
+                        copy.ColumnMappings.Add("dateTime", "dateTime");
+                        copy.ColumnMappings.Add("Thread", "Thread");
+                        copy.ColumnMappings.Add("Text", "Text");
+                        copy.ColumnMappings.Add("Filename", "Filename");
+                        copy.ColumnMappings.Add("Type", "Type");
+                        copy.DestinationTableName = "dbo.LogText";
+                        copy.WriteToServer(dt);
+                    }
+
                 }
-                logtexttable.InsertAllOnSubmit<LogText>(logtextlist);
-                db.SubmitChanges();
 
                 /* Speed test 2
                 
@@ -155,7 +135,8 @@ namespace ParseSCCMLogs
 
 
 
-            }catch (Exception e)
+            }
+            catch (Exception e)
             {
                 Console.WriteLine("Problem with SQL Connection");
                 Console.WriteLine(e.Message);
@@ -199,13 +180,25 @@ namespace ParseSCCMLogs
             CsvHelper.Configuration.Configuration csvconf = new CsvHelper.Configuration.Configuration();
             csvconf.RegisterClassMap(new LogLineMap());
 
+            // Determine Hostname
+            string host;
+            if (logfiles[0].Substring(0, 1) == "\\")
+            {
+                // First character of log paths is \ (Remote Hostname)
+                host = logfiles[0].Split('\\')[2];
+            }
+            else
+            {
+                host = System.Environment.MachineName;
+            }
+
             if (v == false)
             {
                 // Single CSV
                 List<LogLine> loglines = new List<LogLine>();
                 Parallel.ForEach(logfiles, (log) =>
                 {
-                    loglines.AddRange(ParseLogFile(log));
+                    loglines.AddRange(ParseLogFile(log, host));
                 });
                 string outfilename = destinationDir + "\\AllLogs.csv";
                 StreamWriter sw = new StreamWriter(outfilename);
@@ -218,7 +211,7 @@ namespace ParseSCCMLogs
                 // Multiple CSVs
                 Parallel.ForEach(logfiles, (log) =>
                 {
-                    List<LogLine> loglines = ParseLogFile(log);
+                    List<LogLine> loglines = ParseLogFile(log, host);
                     if (loglines.Count > 0)
                     {
                         string[] filenamesplit = log.Split('\\');
@@ -261,7 +254,7 @@ namespace ParseSCCMLogs
             return logfiles;
         }
 
-        static List<LogLine> ParseLogFile(string path)
+        static List<LogLine> ParseLogFile(string path, string hostname)
         {
             // Fastest way to read files : http://cc.davelozinski.com/c-sharp/the-fastest-way-to-read-and-process-text-files
 
@@ -288,7 +281,7 @@ namespace ParseSCCMLogs
                 {
                     // Buffer string is used to hangle multiline entries
 
-                    Object[] objarr = ParseLogLine(line, buffer);
+                    Object[] objarr = ParseLogLine(line, buffer, hostname);
                     // If the line is part of a multiline entry the ParseLogLine function will return null until the whole multiline has been handled
                     if (objarr[0] != null)
                     {
@@ -323,7 +316,7 @@ namespace ParseSCCMLogs
             return matches;
         }
         
-        static Object[] ParseLogLine(string logline, string buffer)
+        static Object[] ParseLogLine(string logline, string buffer, string hostname)
         {
             string dateformat = "M-d-yyyy HH:mm:ss.fff";
             // Regex test 1
@@ -371,7 +364,8 @@ namespace ParseSCCMLogs
             string thread = matches[0].Groups[6].Value;
             string file = matches[0].Groups[7].Value;
 
-            LogLine l = new LogLine(component,
+            LogLine l = new LogLine(hostname,
+                                    component,
                                     time,
                                     Int32.Parse(thread),
                                     text,

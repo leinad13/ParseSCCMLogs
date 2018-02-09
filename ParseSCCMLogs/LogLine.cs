@@ -9,6 +9,7 @@ namespace ParseSCCMLogs
 {
     public class LogLine
     {
+        public string Hostname { get; set; }
         public string Component { get; set; }
         public DateTime dateTime { get; set; }
         public int Thread { get; set; }
@@ -20,8 +21,9 @@ namespace ParseSCCMLogs
         {
         }
 
-        public LogLine(string component, DateTime dateTime, int thread, string text, string filename, short type)
+        public LogLine(string hostname,string component, DateTime dateTime, int thread, string text, string filename, short type)
         {
+            Hostname = hostname;
             Component = component;
             this.dateTime = dateTime;
             Thread = thread;
