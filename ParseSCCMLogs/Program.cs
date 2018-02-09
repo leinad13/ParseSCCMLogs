@@ -11,6 +11,7 @@ using CsvHelper;
 using System.Threading;
 using System.Diagnostics;
 using CommandLine;
+using System.Data.Linq;
 
 namespace ParseSCCMLogs
 {
@@ -95,21 +96,75 @@ namespace ParseSCCMLogs
 
             // 3. Does Hostname exist in Database?
             // 3.1 Determine Hostname
-            string Hostname;
+            string host;
             if (logfiles[0].Substring(0,1) == "\\")
             {
                 // First character of log paths is \ (Remote Hostname)
-                Hostname = logfiles[0].Split('\\')[2];
+                host = logfiles[0].Split('\\')[2];
             }
             else
             {
-                Hostname = System.Environment.MachineName;
+                host = System.Environment.MachineName;
             }
-            // 3.2 - Query Database
+            try
+            {
+                // 3.2 - Query Database
+                DataClasses1DataContext db = new DataClasses1DataContext(BuildSQLConnectionString(serverName, databaseName));
+
+                Table<Hostname> hosttable = db.GetTable<Hostname>();
+                var hostquery =
+                    from h in hosttable
+                    where h.Hostname1 == host
+                    select h;
+                List<Hostname> hostsfound = hostquery.ToList();
+                if (hostsfound.Count != 1)
+                {
+                    Hostname newhost = new Hostname
+                    {
+                        Hostname1 = host,
+                        LastDateEntered = null
+                    };
+                    db.Hostnames.InsertOnSubmit(newhost);
+                    db.SubmitChanges();
+                }
+
+                hostsfound = hostquery.ToList();
+
+                /* Speed test 1*/
+                Table<LogText> logtexttable = db.GetTable<LogText>();
+                List<LogText> logtextlist = new List<LogText>();
+                foreach (LogLine line in loglines)
+                {
+                    logtextlist.Add(new LogText
+                    {
+                        HostnameID = hostsfound[0].HostnameID,
+                        Component = line.Component,
+                        dateTime = line.dateTime,
+                        Thread = line.Thread,
+                        Filename = line.Filename,
+                        Type = line.Type,
+                        Text = line.Text
+                    });
+                }
+                logtexttable.InsertAllOnSubmit<LogText>(logtextlist);
+                db.SubmitChanges();
+
+                /* Speed test 2
+                
+                */
 
 
 
+            }catch (Exception e)
+            {
+                Console.WriteLine("Problem with SQL Connection");
+                Console.WriteLine(e.Message);
+            }            
+        }
 
+        private static string BuildSQLConnectionString(string serv, string db)
+        {
+            return "Server=" + serv + ";Database=" + db + ";Integrated Security=True;";
         }
 
         private static void CheckSQLOptions(Options options)
