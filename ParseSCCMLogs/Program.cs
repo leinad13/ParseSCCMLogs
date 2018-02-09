@@ -60,15 +60,20 @@ namespace ParseSCCMLogs
             switch (options.OutputType)
             {
                 case "csv":
-                    RunParseCSV(options.DestinationDir, true, logfiles);
+                    CheckCSVOptions(options);
+                    RunOutputCSV(options.DestinationDir, true, logfiles);
                     break;
                 case "csv1":
-                    RunParseCSV(options.DestinationDir, false, logfiles);
+                    CheckCSVOptions(options);
+                    RunOutputCSV(options.DestinationDir, false, logfiles);
+                    break;
+                case "sql":
+                    CheckSQLOptions(options);
+                    RunOutputSQL(options.ServerName, options.DatabaseName, logfiles);
                     break;
             }
-
-
-
+            
+            // Stop the stopwatch
             stop.Stop();
             System.Console.WriteLine("Finished in {0}", stop.Elapsed);
 #if DEBUG
@@ -77,10 +82,65 @@ namespace ParseSCCMLogs
 
         }
 
-        private static void RunParseCSV(string destinationDir, bool v, List<string> logfiles)
+        private static void RunOutputSQL(string serverName, string databaseName, List<string> logfiles)
         {
-            Directory.CreateDirectory(destinationDir);
+            // 1. TODO - Check Database Connection is possible
 
+            // 2. Parse and store log rows in List<LogLines>
+            List<LogLine> loglines = new List<LogLine>();
+            Parallel.ForEach(logfiles, (log) =>
+            {
+                loglines.AddRange(ParseLogFile(log));
+            });
+
+            // 3. Does Hostname exist in Database?
+            // 3.1 Determine Hostname
+            string Hostname;
+            if (logfiles[0].Substring(0,1) == "\\")
+            {
+                // First character of log paths is \ (Remote Hostname)
+                Hostname = logfiles[0].Split('\\')[2];
+            }
+            else
+            {
+                Hostname = System.Environment.MachineName;
+            }
+            // 3.2 - Query Database
+
+
+
+
+        }
+
+        private static void CheckSQLOptions(Options options)
+        {
+            if (options.DatabaseName == null || options.ServerName == null)
+            {
+                Console.WriteLine("Please provide SQL ServerName and Database Name");
+            }
+        }
+
+        private static void CheckCSVOptions(Options options)
+        {
+            if (options.DestinationDir == null)
+            {
+                return;
+            } else
+            {
+                try
+                {
+                    Directory.CreateDirectory(options.DestinationDir);
+                } catch (Exception e)
+                {
+                    Console.WriteLine("Problem with output Directory");
+                    Console.WriteLine(e.Message);
+                }
+            }
+        }
+
+        private static void RunOutputCSV(string destinationDir, bool v, List<string> logfiles)
+        {
+            // Create a csv configuration objection with a custom map to enable milliseconds in the dateTime field
             CsvHelper.Configuration.Configuration csvconf = new CsvHelper.Configuration.Configuration();
             csvconf.RegisterClassMap(new LogLineMap());
 
@@ -94,7 +154,7 @@ namespace ParseSCCMLogs
                 });
                 string outfilename = destinationDir + "\\AllLogs.csv";
                 StreamWriter sw = new StreamWriter(outfilename);
-                CsvWriter csv = new CsvWriter(sw,csvconf);
+                CsvWriter csv = new CsvWriter(sw, csvconf);
                 csv.WriteRecords(loglines);
                 sw.Close();
             }
@@ -103,7 +163,6 @@ namespace ParseSCCMLogs
                 // Multiple CSVs
                 Parallel.ForEach(logfiles, (log) =>
                 {
-                    Console.WriteLine("Working on file {0} in Thread {1}", log, Thread.CurrentThread.ManagedThreadId);
                     List<LogLine> loglines = ParseLogFile(log);
                     if (loglines.Count > 0)
                     {
@@ -150,6 +209,8 @@ namespace ParseSCCMLogs
         static List<LogLine> ParseLogFile(string path)
         {
             // Fastest way to read files : http://cc.davelozinski.com/c-sharp/the-fastest-way-to-read-and-process-text-files
+
+            Console.WriteLine("Working on file {0} in Thread {1}", path, Thread.CurrentThread.ManagedThreadId);
 
             List<LogLine> loglinelist = new List<LogLine>();
 

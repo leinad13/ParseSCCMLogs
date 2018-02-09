@@ -39,7 +39,14 @@ namespace ParseSCCMLogs
             // Default CSV DateTime to String conversion was ignoring the millisecond component. This fixes that.
             Map(m => m.dateTime).ConvertUsing(m =>
             {
-                return m.dateTime.ToString("dd/MM/yyyy hh:mm:ss.fff");
+                if (m != null)
+                {
+                    return m.dateTime.ToString("dd/MM/yyyy hh:mm:ss.fff");
+                }
+                else
+                {
+                    return null;
+                }
             });
         }
     }
